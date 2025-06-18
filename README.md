@@ -1,30 +1,29 @@
-✈️ **MDO of Battery-Electric Light Aircraft – Blown-Wing vs Conventional Wing**
-
-👨‍💻** Author: Abhishek Kang**
+✈️ MDO of Battery-Electric Light Aircraft – Blown-Wing vs Conventional Wing
+👨‍💻 Author: Abhishek Kang
 📅 Date: June 2025
 📍 Institution: CSIR-National Aerospace Laboratories (NAL), Bangalore
 🎓 Submitted to: BITS Pilani, Goa Campus
+
 📌 Overview
-**This project implements a Multidisciplinary Design Optimization (MDO) framework using GPkit and Python, to design and compare two aircraft wing configurations:
+This project implements a Multidisciplinary Design Optimization (MDO) framework using GPkit and Python, to design and compare two aircraft wing configurations:
 
 A Blown Wing (BW) using Distributed Electric Propulsion (DEP)
 
 A Conventional Wing (CW)
 
 The tool enables early-stage sizing and performance analysis of a battery-electric Light Aircraft (LA) within a 750 kg MTOW constraint.
-**
-🧰 Project Structure
-File / Folder	Description
-wing_struct.py,beam.py,tail.py is used to define the planform and loading codntions for the wing and is taken from the https://github.com/convexengineering/gplibrary  
-aerodynamics and mission is taken from https://github.com/convexengineering/1682stol for blown wing and adjusted as per the new requirement of the new category aircraft
 
-aircraft_gui.py	Frontend PyQt-based GUI interface for input and visualization of the optimization results
-mission.py (assumed)	Defines the mission architecture (takeoff, cruise, climb, etc.)
+🧰 Project Structure
+File / Module	Description
+wing_struct.py, beam.py, tail.py	Defines the wing planform, loading, and structural components. Adapted from the GPkit GPlibrary.(https://github.com/convexengineering/gplibrary)
+wing.py, mission.py	Defines aerodynamic models and mission segments, adapted from MIT 16.82 STOL GPkit models.(https://github.com/convexengineering/1682stol)
+aircraft_gui.py	PyQt5-based GUI for input handling and output visualization.
+mission.py	(Assumed) Contains definitions of mission architecture including takeoff, climb, cruise, and landing.
 
 🔍 Key Features
 Built using GPkit – a geometric programming tool for globally optimal sizing.
 
-Modular components for:
+Modular and extensible design with support for:
 
 Planform and structural design of wings and tail
 
@@ -32,56 +31,71 @@ Aerodynamic modeling of fuselage and tail boom
 
 Battery and propulsion system sizing
 
-PyQt5 GUI to:
+User-friendly GUI built with PyQt5 for:
 
-Select wing type (BW/CW)
+Selecting wing configuration (BW/CW)
 
-Input parameters like AR, span, battery mass, CLmax, cruise speed, etc.
+Inputting key aircraft parameters (AR, span, CLmax, battery mass, etc.)
 
-Visualize mission summary and wing structural plots
+Displaying mission summary and structural plots
 
 🖥️ How to Run
-✅ Prerequisites:
+✅ Prerequisites
+Make sure the following are installed:
+
 Python 3.x
 
-GPkit,Gpkitmodels for material data 
+gpkit and gpkitmodels (for geometric programming and material data)
 
 PyQt5
 
 NumPy, Matplotlib
 
-💻 Running the GUI:
-# Assuming the code is organized correctly in .py files
-aircraft_gui.py run this file 
+💻 To Run the GUI
+
+# From the project root directory
+python aircraft_gui.py
 ✨ Outputs Provided
 ✅ Optimized aircraft design variables (mass, range, wing dimensions)
 
-📊 Wing structural plots:
+📊 Wing Structural Plots:
 
-Bending moment
+Bending Moment
 
-Tip deflection
+Tip Deflection
 
-Distributed load
+Distributed Load
 
-Inertia and section modulus
+Spar Inertia
 
-✈️ Mission performance summary:
+Section Modulus
 
-Cruise/stall speed
+✈️ Mission Performance Summary:
 
-Estimated range
+Cruise / Stall Speed
 
-Battery capacity
+Estimated Range
 
-Mass breakdown
+Battery Capacity
+
+Mass Breakdown
 
 📈 Results Summary (from Thesis)
-Blown Wing: Lower takeoff distance, better lift during STOL, but reduced range due to higher battery demand.
+Blown Wing (BW):
 
-Conventional Wing: Higher cruise efficiency and longer range.
+Enables shorter takeoff distances
 
-Both designs meet structural safety requirements, validated via FEM.
+Provides enhanced lift via DEP during STOL
+
+Results in higher battery consumption and shorter range
+
+Conventional Wing (CW):
+
+Superior cruise efficiency
+
+Offers longer operational range
+
+✅ Both configurations meet structural safety criteria as validated via FEM simulations.
 
 📚 Citation
 If using this work, please cite:
@@ -89,6 +103,5 @@ If using this work, please cite:
 Abhishek Kang. Multidisciplinary Design Optimization of a Battery-Electric Light Aircraft Using Geometric Programming: A Comparative Study of Blown-Wing and Conventional Configurations. CSIR-NAL / BITS Pilani, 2025.
 
 📬 Contact
-For any questions or collaboration ideas, reach out to:
+For any questions or collaboration opportunities, feel free to reach out:
 📧 abh0207@gmail.com
-
