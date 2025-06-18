@@ -1,0 +1,17 @@
+Mass Summary
+individual motor and passenger-related masses shown
+
+m_tot   = 749.9999999999992 kilogram
+m_wing  = 56.1164698258128 kilogram
+m_htail = 5.558500993803904 kilogram
+m_vtail = 6.075376047985411 kilogram
+m_boom  = 4.391291749975406 kilogram
+m_fuse  = 105.0 kilogram
+m_equip = 112.50000000000011 kilogram
+m_gear  = 30.00000000000013 kilogram
+m_batt  = 204.97652324336997 kilogram
+m_mot   = 2.836633127937701 kilogram
+m_pax   = 86 kilogram
+m_bag   = 10 kilogram
+n_prop  = 10 dimensionless [-]
+n_pax   = 2 dimensionless [-]

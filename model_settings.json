@@ -1,0 +1,15 @@
+{
+  "battery_Estar": "200",
+  "battery_eta": "0.8",
+  "battery_Pburst": "5190",
+  "power_margin": "0.5",
+  "n_plies": "5",
+  "n_pax": "1",
+  "mpax": "86",
+  "mbaggage": "10",
+  "Vstall": "61",
+  "Vne": "108",
+  "planform_tau": "0.12",
+  "planform_lam": "1.0",
+  "n_prop": "10"
+}

@@ -1,0 +1,846 @@
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QGroupBox, QFormLayout, QLineEdit,
+    QPushButton, QLabel, QComboBox, QGridLayout, QTextEdit
+)
+from gpkit import units
+from mission import Mission
+
+class InputsTab(QWidget):
+    def __init__(self, parent_callback):
+        super().__init__()
+        self.inputs = {}
+        self.saved_inputs = {}
+        self.mission = None
+        self.solution = None
+        self.parent_callback = parent_callback
+        self.initUI()
+
+    def initUI(self):
+        main_layout = QVBoxLayout()
+
+        self.wing_selector = QComboBox()
+        self.wing_selector.addItems(["blownwing", "na"])
+        main_layout.addWidget(QLabel("Select Wing Type:"))
+        main_layout.addWidget(self.wing_selector)
+
+        grid = QGridLayout()
+        group_fields = {
+            "Wing": {
+                "AR": "Aspect Ratio", "b": "Span (ft)", "lam": "Taper", "tau": "Thickness Ratio", "n_plies": "Skin Plies"
+            },
+            "Tail": {
+                "V_h": "H-Tail Volume", "V_v": "V-Tail Volume"
+            },
+            "Boom": {
+                "l_boom": "Length (m)", "tau_boom": "Thickness Ratio", "rhoA_boom": "Aerial Density"
+            },
+            "Fuselage": {
+                "l_fus": "Length", "w_fus": "Width", "h_fus": "Height", "Swet_fus": "Wetted Area"
+            },
+            "Aero": {
+                "C_Lmax": "CLmax", "C_D0": "CD₀", "e": "Oswald e", "V_cruise": "Cruise Speed (kts)", "V_stall": "Stall Speed (kts)"
+            },
+            "Propulsion": {
+                "m_batt": "Battery Mass", "E_batt": "Battery Energy", "η": "Eff."
+            },
+            "FlightState": {
+                "rho": "Air Density (kg/m³)", "mu": "Viscosity (kg/m/s)"
+            }
+        }
+
+        row, col = 0, 0
+        for group_name, fields in group_fields.items():
+            box = QGroupBox(group_name)
+            form = QFormLayout()
+            for key, label in fields.items():
+                le = QLineEdit()
+                le.setPlaceholderText(label)
+                self.inputs[key] = le
+                form.addRow(QLabel(key), le)
+            box.setLayout(form)
+            grid.addWidget(box, row, col)
+            col = (col + 1) % 2
+            if col == 0:
+                row += 1
+
+        main_layout.addLayout(grid)
+
+        self.solve_button = QPushButton("🔁 Solve All")
+        self.solve_button.clicked.connect(self.run_solve)
+        main_layout.addWidget(self.solve_button)
+
+        self.summary_box = QTextEdit()
+        self.summary_box.setReadOnly(True)
+        main_layout.addWidget(QLabel("Mission Summary:"))
+        main_layout.addWidget(self.summary_box)
+
+        self.setLayout(main_layout)
+
+    def run_solve(self):
+        try:
+            wingtype = self.wing_selector.currentText()
+            M = Mission(wingmode=wingtype)
+
+            varmap = {
+                "AR": M.aircraft.bw.wing.planform.AR,
+                "b": M.aircraft.bw.wing.planform.b,
+                "lam": M.aircraft.bw.wing.planform.lam,
+                "tau": M.aircraft.bw.wing.planform.tau,
+                "n_plies": M.aircraft.bw.wing.n_plies,
+                "V_h": M.aircraft.htail.Vh,
+                "V_v": M.aircraft.vtail.Vv,
+                "l_boom": M.aircraft.boom.l,
+                "tau_boom": M.aircraft.boom.tau,
+                "rhoA_boom": M.aircraft.boom.rhoA,
+                "l_fus": M.aircraft.fuselage.l,
+                "w_fus": M.aircraft.fuselage.w,
+                "h_fus": M.aircraft.fuselage.h,
+                "Swet_fus": M.aircraft.fuselage.Swet,
+                "C_Lmax": M.CLmax,
+                "C_D0": M.cruise.perf.bw_perf.C_D,
+                "e": M.cruise.perf.bw_perf.e,
+                "V_cruise": M.cruise.flightstate.V,
+                "V_stall": M.Vstall,
+                "m_batt": M.aircraft.battery.m,
+                "E_batt": M.aircraft.battery.E_capacity,
+                "η": M.aircraft.bw.powertrain.eta,
+                "rho": M.cruise.flightstate.rho,
+                "mu": M.cruise.flightstate.mu
+            }
+
+            unitmap = {
+                "b": units.ft,
+                "V_cruise": units.kts,
+                "V_stall": units.kts,
+                "rhoA_boom": units.kg / units.m**2,
+                "Swet_fus": units.m**2,
+                "m_batt": units.kg,
+                "E_batt": units.kWh,
+                "l_boom": units.m,
+                "l_fus": units.m,
+                "w_fus": units.m,
+                "h_fus": units.m,
+                "rho": units.kg / units.m**3,
+                "mu": units.kg / (units.m * units.s)
+            }
+
+            substitutions = {}
+            for key, field in self.inputs.items():
+                val = field.text().strip()
+                if val:
+                    try:
+                        parsed = float(val)
+                        var = varmap[key]
+                        unit = unitmap.get(key, 1)
+                        substitutions[var] = parsed * unit
+                        self.saved_inputs[key] = parsed
+                    except Exception as e:
+                        print(f"⚠️ Skipping invalid input for '{key}': {e}")
+
+            if substitutions:
+                M.substitutions.update(substitutions)
+             
+            M.cost = 1/M.R    
+            sol = M.localsolve("cvxopt")
+            self.mission = M
+            self.solution = sol
+
+            self.parent_callback(M, sol)
+
+            try:
+                total_mass = sol(M.aircraft.mass).to("kg").magnitude
+                stall_speed = sol(M.Vstall).to("kt").magnitude
+                cruise_speed = sol(M.cruise.flightstate.V).to("kt").magnitude
+                range_nmi = sol(M.R).to("nmi").magnitude
+                energy_kwh = sol(M.aircraft.battery.E_capacity).to("kWh").magnitude
+
+                self.summary_box.setText(f"""✅ Mission Summary:
+- Aircraft Mass: {total_mass:.1f} kg
+- Stall Speed: {stall_speed:.1f} kt
+- Cruise Speed: {cruise_speed:.1f} kt
+- Estimated Range: {range_nmi:.1f} nmi
+- Battery Capacity: {energy_kwh:.1f} kWh
+""")
+            except Exception as e:
+                self.summary_box.setText(f"❌ Failed to generate mission summary: {e}")
+
+        except Exception as e:
+            print(f"❌ Solve failed: {e}")
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QGroupBox, QLabel, QTextEdit, QComboBox
+)
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+import numpy as np
+
+class WingDesignTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.solution = None
+        self.mission = None
+        self.plot_data = {}
+        self.initUI()
+
+    def initUI(self):
+        layout = QVBoxLayout()
+
+        self.summary_box = QTextEdit()
+        self.summary_box.setReadOnly(True)
+        summary_group = QGroupBox("Wing Structural Summary")
+        summary_layout = QVBoxLayout()
+        summary_layout.addWidget(self.summary_box)
+        summary_group.setLayout(summary_layout)
+        layout.addWidget(summary_group)
+
+        self.canvas = FigureCanvas(Figure(figsize=(6, 4)))
+        layout.addWidget(self.canvas)
+
+        self.plot_selector = QComboBox()
+        self.plot_selector.addItems([
+            "Deflection", "Bending Moment", "Spar Inertia",
+            "Distributed Load", "Section Modulus", "All (Stacked)"
+        ])
+        self.plot_selector.currentIndexChanged.connect(self.update_plot)
+        layout.addWidget(QLabel("Select Structural Plot:"))
+        layout.addWidget(self.plot_selector)
+
+        self.setLayout(layout)
+
+    def update_from_solution(self, mission, solution):
+        self.mission = mission
+        self.solution = solution
+
+        try:
+            wing = mission.aircraft.bw.wing
+            S = solution(wing.planform.S).to("ft^2").magnitude
+            AR = solution(wing.planform.AR)
+            b = solution(wing.planform.b).to("ft").magnitude
+            W_skin = solution(wing.skin.W).to("lbf").magnitude
+            W_spar = solution(wing.spar.W).to("lbf").magnitude
+            W_total = W_skin + W_spar
+
+            self.prepare_plot_data()
+            w_tip = self.plot_data["w_defl"][-1]
+            M_max = max(self.plot_data["M_bend"])
+            q_max = max(self.plot_data["q_dist"])
+
+            self.summary_box.setText(f"""✅ Wing Structural Summary:
+- Surface Area: {S:.2f} ft²
+- Span: {b:.2f} ft
+- Aspect Ratio: {AR:.2f}
+- Total Wing Weight: {W_total:.2f} lbf
+- Skin Weight: {W_skin:.2f} lbf
+- Spar Weight: {W_spar:.2f} lbf
+- Max Tip Deflection: {w_tip:.3f} m
+- Max Bending Moment: {M_max:.1f} Nm
+- Max Distributed Load: {q_max:.1f} N/m
+""")
+
+            self.update_plot()
+
+        except Exception as e:
+            self.summary_box.setText(f"❌ Failed to extract summary: {e}")
+
+    def prepare_plot_data(self):
+        try:
+            wing = self.mission.aircraft.bw.wing
+            sol = self.solution
+            M = self.mission
+            span = sol(wing.planform.b).to("m").magnitude
+            x = np.linspace(0, 1, len(sol(M.loading.wingl.w).magnitude)) * span / 2
+
+            self.plot_data = {
+                "x": x,
+                "w_defl": sol(M.loading.wingl.w).to("m").magnitude,
+                "M_bend": sol(M.loading.wingl.M).to("N*m").magnitude,
+                "I_beam": sol(wing.spar["I"]).to("m^4").magnitude,
+                "q_dist": sol(M.loading.wingl.q).to("N/m").magnitude,
+                "Sy": sol(wing.spar["Sy"]).to("m^3").magnitude,
+            }
+
+        except Exception as e:
+            self.summary_box.append(f"\n❌ Failed to prepare plot data: {e}")
+
+    def update_plot(self):
+        try:
+            if not self.plot_data:
+                return
+
+            x = self.plot_data["x"]
+            w_defl = self.plot_data["w_defl"]
+            M_bend = self.plot_data["M_bend"]
+            I_beam = self.plot_data["I_beam"]
+            q_dist = self.plot_data["q_dist"]
+            Sy = self.plot_data["Sy"]
+            x_I = x[:len(I_beam)]
+
+            selected = self.plot_selector.currentText()
+            self.canvas.figure.clf()
+
+            if selected == "All (Stacked)":
+                fig = self.canvas.figure
+                axs = fig.subplots(3, 1, sharex=True)
+                axs[0].plot(x, w_defl, color='blue')
+                axs[0].set_ylabel("Deflection (m)")
+                axs[0].grid(True)
+
+                axs[1].plot(x, M_bend, color='green')
+                axs[1].set_ylabel("Moment (Nm)")
+                axs[1].grid(True)
+
+                axs[2].plot(x_I, I_beam, color='orange')
+                axs[2].set_ylabel("Inertia (m⁴)")
+                axs[2].set_xlabel("Spanwise Position (m)")
+                axs[2].grid(True)
+                fig.tight_layout()
+
+            else:
+                ax = self.canvas.figure.add_subplot(111)
+                if selected == "Deflection":
+                    ax.plot(x, w_defl, lw=2, color='blue')
+                    ax.set_ylabel("Deflection (m)")
+                elif selected == "Bending Moment":
+                    ax.plot(x, M_bend, lw=2, color='green')
+                    ax.set_ylabel("Moment (Nm)")
+                elif selected == "Spar Inertia":
+                    ax.plot(x_I, I_beam, lw=2, color='orange')
+                    ax.set_ylabel("Inertia (m⁴)")
+                elif selected == "Distributed Load":
+                    ax.plot(x, q_dist, lw=2, color='red')
+                    ax.set_ylabel("q (N/m)")
+                elif selected == "Section Modulus":
+                    ax.plot(x_I, Sy, lw=2, color='purple')
+                    ax.set_ylabel("Section Modulus (m³)")
+
+                ax.set_xlabel("Spanwise Position (m)")
+                ax.set_title(f"Wing Structural: {selected}")
+                ax.grid(True)
+
+            self.canvas.draw()
+
+        except Exception as e:
+            self.summary_box.append(f"\n❌ Plot update failed: {e}")
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QGroupBox, QLabel, QTextEdit, QComboBox
+)
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+import numpy as np
+
+class TailSizingTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.M = None
+        self.sol = None
+        self.initUI()
+
+    def initUI(self):
+        layout = QVBoxLayout()
+
+        self.summary_box = QTextEdit()
+        self.summary_box.setReadOnly(True)
+        layout.addWidget(QLabel("Tail Sizing Summary:"))
+        layout.addWidget(self.summary_box)
+
+        self.plot_selector = QComboBox()
+        self.plot_selector.addItems([
+            "HTail Deflection", "HTail Spar Inertia", "HTail Section Modulus",
+            "VTail Deflection", "VTail Spar Inertia", "VTail Section Modulus"
+        ])
+        self.plot_selector.currentIndexChanged.connect(self.update_plot)
+        layout.addWidget(self.plot_selector)
+
+        self.canvas = FigureCanvas(Figure(figsize=(6, 4)))
+        layout.addWidget(self.canvas)
+
+        self.setLayout(layout)
+
+    def update_from_solution(self, mission, solution):
+        self.M = mission
+        self.sol = solution
+        self.prepare_plot_data()
+        self.build_summary()
+        self.update_plot()
+
+    def prepare_plot_data(self):
+        try:
+            sol = self.sol
+            M = self.M
+
+            # Horizontal tail
+            self.ht_defl = sol(M.loading.hl.w).to("m").magnitude
+            self.ht_I = sol(M.aircraft.htail.spar["I"]).to("m^4").magnitude
+            self.ht_Sy = sol(M.aircraft.htail.spar["Sy"]).to("m^3").magnitude
+
+            # Vertical tail
+            self.vt_defl = sol(M.loading.vl.w).to("m").magnitude
+            self.vt_I = sol(M.aircraft.vtail.spar["I"]).to("m^4").magnitude
+            self.vt_Sy = sol(M.aircraft.vtail.spar["Sy"]).to("m^3").magnitude
+
+            # Spanwise positions (use linear assumption)
+            self.x_ht = np.linspace(0, 1, len(self.ht_defl))
+            self.x_vt = np.linspace(0, 1, len(self.vt_defl))
+
+        except Exception as e:
+            self.summary_box.setText(f"❌ Failed to extract plot data: {e}")
+
+    def build_summary(self):
+        try:
+            sol = self.sol
+            M = self.M
+            W_ht = sol(M.aircraft.htail.W).to("lbf").magnitude
+            W_vt = sol(M.aircraft.vtail.W).to("lbf").magnitude
+            b_ht = sol(M.aircraft.htail.planform.b).to("ft").magnitude
+            b_vt = sol(M.aircraft.vtail.planform.b).to("ft").magnitude
+            lh = sol(M.aircraft.htail.lh).to("ft").magnitude
+            lv = sol(M.aircraft.vtail.lv).to("ft").magnitude
+
+            self.summary_box.setText(f"""✅ Tail Sizing Summary:
+- HTail Span: {b_ht:.2f} ft, Weight: {W_ht:.2f} lbf, Moment Arm: {lh:.2f} ft
+- VTail Span: {b_vt:.2f} ft, Weight: {W_vt:.2f} lbf, Moment Arm: {lv:.2f} ft
+- HTail Max Deflection: {max(self.ht_defl):.3f} m
+- VTail Max Deflection: {max(self.vt_defl):.3f} m
+""")
+
+        except Exception as e:
+            self.summary_box.setText(f"❌ Failed to build summary: {e}")
+
+    def update_plot(self):
+        try:
+            self.canvas.figure.clf()
+            ax = self.canvas.figure.add_subplot(111)
+            selected = self.plot_selector.currentText()
+
+            if selected == "HTail Deflection":
+                ax.plot(self.x_ht, self.ht_defl, color="blue")
+                ax.set_ylabel("Deflection (m)")
+            elif selected == "HTail Spar Inertia":
+                ax.plot(self.x_ht[:len(self.ht_I)], self.ht_I, color="green")
+                ax.set_ylabel("Spar Inertia (m⁴)")
+            elif selected == "HTail Section Modulus":
+                ax.plot(self.x_ht[:len(self.ht_Sy)], self.ht_Sy, color="orange")
+                ax.set_ylabel("Section Modulus (m³)")
+            elif selected == "VTail Deflection":
+                ax.plot(self.x_vt, self.vt_defl, color="red")
+                ax.set_ylabel("Deflection (m)")
+            elif selected == "VTail Spar Inertia":
+                ax.plot(self.x_vt[:len(self.vt_I)], self.vt_I, color="purple")
+                ax.set_ylabel("Spar Inertia (m⁴)")
+            elif selected == "VTail Section Modulus":
+                ax.plot(self.x_vt[:len(self.vt_Sy)], self.vt_Sy, color="brown")
+                ax.set_ylabel("Section Modulus (m³)")
+
+            ax.set_xlabel("Normalized Span")
+            ax.set_title(selected)
+            ax.grid(True)
+            self.canvas.draw()
+
+        except Exception as e:
+            self.summary_box.append(f"❌ Plot update error: {e}")
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QLabel, QTextEdit, QComboBox
+)
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+import numpy as np
+
+class TailBoomTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.M = None
+        self.sol = None
+        self.initUI()
+
+    def initUI(self):
+        layout = QVBoxLayout()
+        self.summary_box = QTextEdit()
+        self.summary_box.setReadOnly(True)
+        layout.addWidget(QLabel("Tail Boom Bending Summary:"))
+        layout.addWidget(self.summary_box)
+
+        self.plot_selector = QComboBox()
+        self.plot_selector.addItems(["H-Boom Deflection", "V-Boom Deflection"])
+        self.plot_selector.currentIndexChanged.connect(self.update_plot)
+        layout.addWidget(self.plot_selector)
+
+        self.canvas = FigureCanvas(Figure(figsize=(5, 3)))
+        layout.addWidget(self.canvas)
+        self.setLayout(layout)
+
+    def update_from_solution(self, mission, solution):
+        self.M = mission
+        self.sol = solution
+        self.build_summary()
+        self.update_plot()
+
+    def build_summary(self):
+        try:
+            sol = self.sol
+            hb = self.M.loading.hbend
+            vb = self.M.loading.vbend
+            th_h = sol(hb.th)
+            th_v = sol(vb.th)
+            self.summary_box.setText(f"""✅ Boom Summary:
+- H-Boom Max Deflection Angle: {th_h:.4f} rad
+- V-Boom Max Deflection Angle: {th_v:.4f} rad""")
+        except Exception as e:
+            self.summary_box.setText(f"❌ Failed to extract summary: {e}")
+
+    def update_plot(self):
+        try:
+            boom = self.M.loading.hbend if "H-" in self.plot_selector.currentText() else self.M.loading.vbend
+            sol = self.sol
+            delta = sol(boom.beam["\\bar{\\delta}"])
+            dx = sol(boom.beam["dx"])
+            x = np.cumsum(dx)
+
+            self.canvas.figure.clf()
+            ax = self.canvas.figure.add_subplot(111)
+            ax.plot(x, delta, lw=2)
+            ax.set_xlabel("Boom Length (normalized)")
+            ax.set_ylabel("Deflection (normalized)")
+            ax.set_title("Tail Boom Deflection Profile")
+            ax.grid(True)
+            self.canvas.draw()
+        except Exception as e:
+            self.summary_box.append(f"❌ Plot error: {e}")
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QLabel, QTextEdit
+)
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+
+
+class PropulsionTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.M = None
+        self.sol = None
+        self.initUI()
+
+    def initUI(self):
+        layout = QVBoxLayout()
+
+        self.summary_box = QTextEdit()
+        self.summary_box.setReadOnly(True)
+        layout.addWidget(QLabel("🔋 Propulsion & Battery Summary"))
+        layout.addWidget(self.summary_box)
+
+        self.canvas = FigureCanvas(Figure(figsize=(5, 3)))
+        layout.addWidget(QLabel("🔌 Energy Use by Segment"))
+        layout.addWidget(self.canvas)
+
+        self.setLayout(layout)
+
+    def update_from_solution(self, mission, solution):
+        self.M = mission
+        self.sol = solution
+        self.build_summary()
+        self.plot_energy_breakdown()
+
+    def build_summary(self):
+        try:
+            ac = self.M.aircraft
+            sol = self.sol
+
+            m_batt = sol(ac.battery.m).to("kg").magnitude
+            E_batt = sol(ac.battery.E_capacity).to("kWh").magnitude
+            eta = sol(ac.bw.powertrain.eta)
+
+            self.summary_box.setText(f"""✅ Propulsion Summary:
+- Battery Mass: {m_batt:.2f} kg
+- Battery Energy: {E_batt:.2f} kWh
+- Powertrain Efficiency: {eta:.3f}
+""")
+        except Exception as e:
+            self.summary_box.setText(f"❌ Failed to extract summary: {e}")
+
+    def plot_energy_breakdown(self):
+        try:
+            M = self.M
+            sol = self.sol
+            ax = self.canvas.figure.clf()
+            ax = self.canvas.figure.add_subplot(111)
+
+            # Energy use approximation (Power x Time)
+            segs = ["TO1", "TO2", "TO3", "TO4", "CL1", "CL2", "CR", "L"]
+            thrusts = [
+                sol(M.takeoff.perf.bw_perf.T[0]),
+                sol(M.takeoff.perf.bw_perf.T[1]),
+                sol(M.takeoff.perf.bw_perf.T[2]),
+                sol(M.takeoff.perf.bw_perf.T[3]),
+                sol(M.obstacle_climb.perf.bw_perf.T),
+                sol(M.climb.perf.bw_perf.T),
+                sol(M.cruise.perf.bw_perf.T),
+                sol(M.landing.perf.bw_perf.T)
+            ]
+            vels = [
+                sol(M.takeoff.perf.fs.V[0]),
+                sol(M.takeoff.perf.fs.V[1]),
+                sol(M.takeoff.perf.fs.V[2]),
+                sol(M.takeoff.perf.fs.V[3]),
+                sol(M.obstacle_climb.perf.fs.V),
+                sol(M.climb.perf.fs.V),
+                sol(M.cruise.perf.fs.V),
+                sol(M.landing.perf.fs.V)
+            ]
+            times = [
+                sol(M.takeoff.t[0]),
+                sol(M.takeoff.t[1]),
+                sol(M.takeoff.t[2]),
+                sol(M.takeoff.t[3]),
+                sol(M.obstacle_climb.t),
+                sol(M.climb.t),
+                sol(M.cruise.t),
+                sol(M.landing.t)
+            ]
+
+            # Energy = T × V × t (rough approximation)
+            energies = [
+                (T * V * t).to("kWh").magnitude
+                for T, V, t in zip(thrusts, vels, times)
+            ]
+
+            ax.bar(segs, energies, color="skyblue")
+            ax.set_ylabel("Estimated Energy Used (kWh)")
+            ax.set_xlabel("Mission Segment")
+            ax.set_title("Segment-Wise Energy Use")
+            ax.grid(True)
+            self.canvas.draw()
+
+        except Exception as e:
+            self.summary_box.append(f"\n❌ Plotting error: {e}")
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QLabel, QTextEdit
+)
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+import numpy as np
+
+
+class MissionTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.M = None
+        self.sol = None
+        self.initUI()
+
+    def initUI(self):
+        layout = QVBoxLayout()
+
+        self.summary_box = QTextEdit()
+        self.summary_box.setReadOnly(True)
+        layout.addWidget(QLabel("🛫 Mission Summary"))
+        layout.addWidget(self.summary_box)
+
+        self.canvas = FigureCanvas(Figure(figsize=(6, 4)))
+        layout.addWidget(QLabel("📈 Mission Segment Profiles"))
+        layout.addWidget(self.canvas)
+
+        self.setLayout(layout)
+
+    def update_from_solution(self, mission, solution):
+        self.M = mission
+        self.sol = solution
+        self.build_summary()
+        self.plot_mission_profiles()
+
+    def build_summary(self):
+        try:
+            M = self.M
+            sol = self.sol
+
+            # Total time and range
+            total_time = sum([
+                sol(M.takeoff.t[0]), sol(M.takeoff.t[1]), sol(M.takeoff.t[2]), sol(M.takeoff.t[3]),
+                sol(M.obstacle_climb.t), sol(M.climb.t),
+                sol(M.cruise.t), sol(M.landing.t)
+            ]).to("min").magnitude
+
+            total_range = (
+                sol(M.takeoff.Sto[0]) + sol(M.takeoff.Sto[1]) + sol(M.takeoff.Sto[2]) + sol(M.takeoff.Sto[3]) +
+                sol(M.obstacle_climb.Sclimb) + sol(M.climb.Sclimb) + sol(M.cruise.R) + sol(M.landing.Sgr)
+            ).to("nmi").magnitude
+
+            self.summary_box.setText(f"""✅ Mission Summary:
+- Total Flight Time: {total_time:.1f} minutes
+- Total Range: {total_range:.1f} nautical miles
+""")
+        except Exception as e:
+            self.summary_box.setText(f"❌ Failed to extract summary: {e}")
+
+    def plot_mission_profiles(self):
+        try:
+            M = self.M
+            sol = self.sol
+            ax = self.canvas.figure.clf()
+            ax = self.canvas.figure.add_subplot(111)
+
+            segments = ["TO1", "TO2", "TO3", "TO4", "CL1", "CL2", "CR", "L"]
+            times = [
+                sol(M.takeoff.t[0]), sol(M.takeoff.t[1]), sol(M.takeoff.t[2]), sol(M.takeoff.t[3]),
+                sol(M.obstacle_climb.t), sol(M.climb.t), sol(M.cruise.t), sol(M.landing.t)
+            ]
+            times = np.cumsum([t.to("s").magnitude for t in times])
+
+            velocities = [
+                sol(M.takeoff.perf.fs.V[0]), sol(M.takeoff.perf.fs.V[1]),
+                sol(M.takeoff.perf.fs.V[2]), sol(M.takeoff.perf.fs.V[3]),
+                sol(M.obstacle_climb.perf.fs.V), sol(M.climb.perf.fs.V),
+                sol(M.cruise.perf.fs.V), sol(M.landing.perf.fs.V)
+            ]
+            velocities = [v.to("kts").magnitude for v in velocities]
+
+            ax.plot(times, velocities, label="Velocity (kts)", color="blue", marker="o")
+
+            try:
+                altitudes = [
+                    
+                    sol(M.obstacle_climb.h_gain), sol(M.climb.h_gain),
+                ]
+                altitudes = [h.to("ft").magnitude for h in altitudes]
+                ax.plot(times, altitudes, label="Altitude (ft)", color="green", marker="x")
+            except Exception:
+                self.summary_box.append("ℹ️ Altitude profile not available.")
+
+            ax.set_title("Mission Segment Profiles")
+            ax.set_xlabel("Cumulative Time (s)")
+            ax.set_ylabel("Performance")
+            ax.legend()
+            ax.grid(True)
+            self.canvas.draw()
+        except Exception as e:
+            self.summary_box.append(f"\n❌ Plotting error: {e}")
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QLabel, QTextEdit
+)
+
+class FuselageTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.M = None
+        self.sol = None
+        self.initUI()
+
+    def initUI(self):
+        layout = QVBoxLayout()
+        self.summary_box = QTextEdit()
+        self.summary_box.setReadOnly(True)
+        layout.addWidget(QLabel("Fuselage and Gear Summary:"))
+        layout.addWidget(self.summary_box)
+        self.setLayout(layout)
+
+    def update_from_solution(self, mission, solution):
+        self.M = mission
+        self.sol = solution
+        self.build_summary()
+
+    def build_summary(self):
+        try:
+            fuselage = self.M.aircraft.fuselage
+            gear = self.M.aircraft.gear
+            equip = self.M.aircraft.equipment
+            sol = self.sol
+
+            l = sol(fuselage.l).to("m").magnitude
+            w = sol(fuselage.w).to("m").magnitude
+            h = sol(fuselage.h).to("m").magnitude
+            Swet = sol(fuselage.Swet).to("m^2").magnitude
+
+            m_gear = sol(gear.m).to("kg").magnitude
+            l_gear = sol(gear.l).to("m").magnitude
+            
+            m_equip = sol(equip.m).to("kg").magnitude
+
+            self.summary_box.setText(f"""✅ Fuselage & Gear Summary:
+- Fuselage: {l:.2f} m x {w:.2f} m x {h:.2f} m
+- Wetted Area: {Swet:.2f} m²
+- Gear Mass: {m_gear:.2f} kg, Length: {l_gear:.2f} m
+--- Equipment ---
+- Avionics Mass: {m_equip:.2f} kg""")
+        except Exception as e:
+            self.summary_box.setText(f"❌ Summary failed: {e}")
+import sys
+from PyQt5.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QTabWidget, QLabel
+)
+
+from inputtab import InputsTab
+from wingtab import WingDesignTab
+from tailtab import TailSizingTab
+from tailboom import TailBoomTab
+from Fuselagetab import FuselageTab
+from aerotab import AerodynamicsTab
+from missiontab import MissionTab
+from proptab import PropulsionTab
+# from plots_tab import PlotsTab (optional)
+
+
+class GPkitGUI(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("GPkit Aircraft Design GUI")
+        self.setGeometry(100, 100, 1100, 750)
+
+        self.solution = None
+        self.mission = None
+
+        self.tabs = QTabWidget()
+        self.init_tabs()
+
+        layout = QVBoxLayout()
+        layout.addWidget(self.tabs)
+        self.setLayout(layout)
+
+    def init_tabs(self):
+        # Input Tab (Triggers Solve)
+        self.inputs_tab = InputsTab(self.handle_solution)
+        self.tabs.addTab(self.inputs_tab, "Inputs + Solve")
+
+        # Result Tabs (Display only after solve)
+        self.wing_tab = WingDesignTab()
+        self.tabs.addTab(self.wing_tab, "Wing")
+
+        self.tail_tab = TailSizingTab()
+        self.tabs.addTab(self.tail_tab, "Tail")
+
+        self.tailboom_tab = TailBoomTab()
+        self.tabs.addTab(self.tailboom_tab, "Tail Boom")
+
+        self.fuselage_tab = FuselageTab()
+        self.tabs.addTab(self.fuselage_tab, "Fuselage + Gear")
+
+        self.aero_tab = AerodynamicsTab()
+        self.tabs.addTab(self.aero_tab, "Aerodynamics")
+
+        self.mission_tab = MissionTab()
+        self.tabs.addTab(self.mission_tab, "Mission")
+
+        
+        self.propulsion_tab = PropulsionTab()
+        self.tabs.addTab(self.propulsion_tab, "Propulsion")
+
+        # self.plots_tab = PlotsTab()
+        # self.tabs.addTab(self.plots_tab, "Extra Plots")
+
+    def handle_solution(self, mission_model, solution_data):
+        """Callback called by InputsTab after a solve."""
+        self.mission = mission_model
+        self.solution = solution_data
+
+        # Propagate to all result tabs
+        self.wing_tab.update_from_solution(mission_model, solution_data)
+        self.tail_tab.update_from_solution(mission_model, solution_data)
+        self.tailboom_tab.update_from_solution(mission_model, solution_data)
+        self.fuselage_tab.update_from_solution(mission_model, solution_data)
+        self.aero_tab.update_from_solution(mission_model, solution_data)
+        self.mission_tab.update_from_solution(mission_model, solution_data)
+        self.propulsion_tab.update_from_solution(mission_model, solution_data)
+        # self.plots_tab.update_from_solution(...)
+
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = GPkitGUI()
+    window.show()
+    sys.exit(app.exec_())
