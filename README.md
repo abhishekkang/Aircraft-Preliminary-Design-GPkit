@@ -50,7 +50,7 @@ The tool enables early-stage sizing and performance analysis of a battery-electr
 Make sure the following are installed:
 
 - Python 3.x  
-- `gpkit` and `gpkitmodels` (for geometric programming and material data)  
+- `gpkit` and `gpkitmodels` (for geometric programming and material data,https://github.com/convexengineering/gplibrary)  
 - `PyQt5`  
 - `NumPy`, `Matplotlib`  
 
