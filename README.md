@@ -1,4 +1,5 @@
 ✈️ **MDO of Battery-Electric Light Aircraft – Blown-Wing vs Conventional Wing**
+
 👨‍💻** Author: Abhishek Kang**
 📅 Date: June 2025
 📍 Institution: CSIR-National Aerospace Laboratories (NAL), Bangalore
@@ -15,7 +16,8 @@ The tool enables early-stage sizing and performance analysis of a battery-electr
 🧰 Project Structure
 File / Folder	Description
 wing_struct.py,beam.py,tail.py is used to define the planform and loading codntions for the wing and is taken from the https://github.com/convexengineering/gplibrary  
-aerodynamics and mission is taken from https://github.com/convexengineering/1682stol for blown wing and adjusted as per the new requirement of the new ctegory aircraft
+aerodynamics and mission is taken from https://github.com/convexengineering/1682stol for blown wing and adjusted as per the new requirement of the new category aircraft
+
 aircraft_gui.py	Frontend PyQt-based GUI interface for input and visualization of the optimization results
 mission.py (assumed)	Defines the mission architecture (takeoff, cruise, climb, etc.)
 
